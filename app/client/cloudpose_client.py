@@ -7,7 +7,6 @@ import requests
 import threading
 import uuid
 import base64
-import  json
 import os
 
 #send http request
@@ -24,7 +23,8 @@ def call_cloudpose_service(image):
         data ['id'] = str(img_id)
         headers = {'Content-Type': 'application/json'}
 
-        response = requests.post(url, json= json.dumps(data), headers = headers)
+        response = requests.post(url, json=data, headers=headers)
+
 
         if response.ok:
             output = "Thread : {},  input image: {},  output:{}".format(threading.current_thread().getName(),
@@ -50,9 +50,7 @@ def main():
                          format("python Cloudpose_client.py", "<input_folder>", "<URL>", "<number_of_workers>"))
 
     input_folder = os.path.join(sys.argv[1], "")
-    print(input_folder)
     images = get_images_to_be_processed(input_folder)
-    print(images)
     num_images = images.__len__()
     num_workers = int(sys.argv[3])
     start_time = time.time()
@@ -61,7 +59,6 @@ def main():
         for _ in executor.map(call_cloudpose_service,  images):
             pass
     elapsed_time =  time.time() - start_time
-    
     print("Total time spent: {} average response time: {}".format(elapsed_time, elapsed_time/num_images))
 
 
