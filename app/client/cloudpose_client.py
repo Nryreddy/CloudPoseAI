@@ -54,7 +54,7 @@ def main():
     num_images = images.__len__()
     num_workers = int(sys.argv[3])
     start_time = time.time()
-    #craete a worker  thread  to  invoke the requests in parallel
+    #create a worker  thread  to  invoke the requests in parallel
     with PoolExecutor(max_workers=num_workers) as executor:
         for _ in executor.map(call_cloudpose_service,  images):
             pass
