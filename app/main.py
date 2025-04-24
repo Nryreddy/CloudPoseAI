@@ -7,6 +7,7 @@ import numpy as np
 import time
 from ultralytics import YOLO
 import logging
+import gc
 
 from model1_yolox.pose_detection import predict
 
@@ -32,83 +33,73 @@ class DetectionResponse(BaseModel):
     speed_inference: float
     speed_postprocess: float
 
-def decode_base64_image(base64_str):
-    return cv2.imdecode(np.frombuffer(base64.b64decode(base64_str), np.uint8), cv2.IMREAD_COLOR)
+def decode_base64_image(b64: str) -> np.ndarray:
+    data = base64.b64decode(b64)
+    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    # 3) Resize down to 320×320
+    return cv2.resize(img, (320, 320))
 
 
 @app.on_event("startup")
 def load_model():
     global model
     model = YOLO("./model1_yolox/yolo11x-pose.pt")
-    model.to("cpu")  # ensure model stays on CPU
 
 @app.post("/json_keypoints", response_model=DetectionResponse)
 async def get_pose_json(req: ImageRequest):
-    global model
-
-    preprocess_start = time.time()
+    # preprocess timing
+    t0 = time.time()
     img = decode_base64_image(req.image)
-    preprocess_end = time.time()
+    t1 = time.time()
 
-    inference_start = time.time()
+    # inference timing (ultralytics already runs under no_grad())
+    t2 = time.time()
     results = model(img)
-    inference_end = time.time()
+    t3 = time.time()
 
-    post_start = time.time()
-    result = results[0]
-
-    print(f"Result: {result}")
-
-    keypoints_all = []
-    boxes = []
+    res = results[0]
 
     try:
-        # get bbox centers / sizes
-        if hasattr(result.boxes.xywh, "cpu"):
-            boxes_xywh = result.boxes.xywh.cpu().numpy()
-        else:
-            boxes_xywh = np.array(result.boxes.xywh)
+        # ensure there are keypoints to process
+        boxes_xywh = res.boxes.xywh.tolist()   # list of [cx, cy, w, h]
+        box_confs  = res.boxes.conf.tolist()   # list of confidences
+        kps_all    = res.keypoints.data.tolist()  # list of persons × keypoints × [x, y, c]
 
-        # get confidences
-        if hasattr(result.boxes.conf, "cpu"):
-            box_confs = result.boxes.conf.cpu().numpy()
-        else:
-            box_confs = np.array(result.boxes.conf)
-
-        # raw keypoints tensor (n,keypoints,3)
-        kps_np = result.keypoints.data.cpu().numpy()
-
-        # build JSONables
-        keypoints_all = [
-            [[float(x), float(y), float(c)] for x, y, c in person_kps]
-            for person_kps in kps_np
+        # build JSON-friendly dicts
+        boxes = [
+            {
+                "x": cx - w/2,
+                "y": cy - h/2,
+                "width": w,
+                "height": h,
+                "probability": p
+            }
+            for (cx, cy, w, h), p in zip(boxes_xywh, box_confs)
         ]
 
-        boxes = []
-        for (cx, cy, w, h), p in zip(boxes_xywh, box_confs):
-            boxes.append({
-                "x": float(cx - w/2),
-                "y": float(cy - h/2),
-                "width": float(w),
-                "height": float(h),
-                "probability": float(p)
-            })
+        keypoints = [
+            [[x, y, c] for x, y, c in person_kps]
+            for person_kps in kps_all
+        ]
 
     except Exception as e:
-        # now logs the real Python error instead of a mysterious 500
         raise HTTPException(status_code=500, detail=f"Post-processing error: {e}")
 
-    post_end = time.time()
+    t4 = time.time()
+
+    # 5) cleanup large temporaries immediately
+    del results, res, boxes_xywh, box_confs, kps_all
+    gc.collect()
 
     return {
-            "id": req.id,
-            "count": len(boxes),
-            "boxes": boxes,
-            "keypoints": keypoints_all,
-            "speed_preprocess": round(preprocess_end - preprocess_start, 4),
-            "speed_inference": round(inference_end - inference_start, 4),
-            "speed_postprocess": round(post_end - post_start, 4)
-        }
+        "id": req.id,
+        "count": len(boxes),
+        "boxes": boxes,
+        "keypoints": keypoints,
+        "speed_preprocess":   round((t1 - t0) * 1000, 2),
+        "speed_inference":    round((t3 - t2) * 1000, 2),
+        "speed_postprocess":  round((t4 - t3) * 1000, 2)
+    }
 
 connections = [
     (5, 6),   # left shoulder ↔ right shoulder
