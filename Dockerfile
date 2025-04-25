@@ -1,45 +1,57 @@
-# ---------- Stage 1: Build ----------
-FROM python:3.10-slim as builder
+############################################
+# 1) Builder stage: compile & install deps
+############################################
+FROM python:3.10-slim AS builder
 
-
-# Set environment variables to prevent Python from writing .pyc files and buffering stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
-PYTHONUNBUFFERED=1 \
-PIP_NO_CACHE_DIR=1
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
-RUN apk add --no-cache \
-build-base \
-libjpeg-turbo-dev \
-zlib-dev \
-libffi-dev \
-openssl-dev \
-git
+# only the bare minimum libs for opencv-python-headless
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      build-essential \
+      libgl1 \
+      libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
 
-# Create and set working directory
-WORKDIR /app
+WORKDIR /install
 
-# Install pipenv dependencies
+# first install CPU-only PyTorch & torchvision
+RUN pip install --prefix=/install \
+      torch torchvision \
+      --index-url https://download.pytorch.org/whl/cpu
+
+# then install the rest of your Python dependencies
 COPY requirements.txt .
+RUN pip install --prefix=/install -r requirements.txt
 
-RUN pip install --upgrade pip && \
-pip wheel --no-deps --wheel-dir=/wheels -r requirements.txt
+############################################
+# 2) Runtime stage: copy runtime bits only
+############################################
+FROM python:3.10-slim AS runtime
 
-# ---------- Stage 2: Final (distroless) ----------
-FROM gcr.io/distroless/python3-debian11
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# again, only the libs needed at runtime for OpenCV-headless
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      libgl1 \
+      libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
+
+# copy installed Python packages from the builder
+COPY --from=builder /install /usr/local
 
 WORKDIR /app
 
-# Copy installed packages from builder
-COPY --from=builder /wheels /wheels
-COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
-COPY --from=builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
+# copy only the files and dirs your server actually uses:
+    COPY app/main.py       ./main.py
+    COPY app/model1_yolox/  ./model1_yolox/
 
-# Copy your FastAPI app code
-COPY . .
+EXPOSE 60000
 
-# Expose the port your app runs on
-EXPOSE 60010
-
-# Command to run the FastAPI app with Uvicorn
-CMD ["uvicorn", "pose_api:app", "--host", "0.0.0.0", "--port", "60000"]
+# match your 0.5-CPU / 512Mi limit by using one worker
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "60000", "--workers", "1"]
