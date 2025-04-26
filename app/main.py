@@ -7,7 +7,7 @@ from ultralytics import YOLO
 app = FastAPI()
 model = None
 
-# your COCO‐style connections
+# COCO‐style connections
 CONNECTIONS = [(5,6), (5,11), (6,12), (11,12)]
 
 class ImageRequest(BaseModel):
@@ -80,12 +80,14 @@ async def get_pose_json(req: ImageRequest):
     # 3) post-process
     t1 = time.time()
     try:
-        boxes, keypoints = extract_detections(res)
+        if not res.keypoints or res.keypoints.xy is None or len(res.boxes) == 0:
+            boxes, keypoints = [], []
+        else:
+            boxes, keypoints = extract_detections(res)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Post-processing error: {e}")
     t_post = (time.time() - t1) * 1000
 
-    # 4) cleanup
     gc.collect()
 
     return {
@@ -103,18 +105,21 @@ async def get_annotated_image(req: ImageRequest):
     img = decode_and_resize(req.image)
     res, _ = run_inference(img)
 
-    if not res.keypoints or res.keypoints.xy is None:
-        raise HTTPException(status_code=200, detail={
-            "id": req.id, "message": "No person detected", "annotated_image": None
-        })
+    if not res.keypoints or res.keypoints.xy is None or len(res.boxes) == 0:
+        return {
+            "id": req.id,
+            "annotated_image": None
+        }
 
     annotated = annotate_image(img, res)
     success, buf = cv2.imencode('.jpg', annotated)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to encode image")
 
-    return {"id": req.id, "annotated_image": base64.b64encode(buf).decode('utf-8')}
-
+    return {
+        "id": req.id,
+        "annotated_image": base64.b64encode(buf).decode('utf-8')
+    }
 
 if __name__ == "__main__":
     import uvicorn
