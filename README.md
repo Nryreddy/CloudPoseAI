@@ -21,7 +21,7 @@ It is built with **FastAPI** + **Ultralytics YOLOv11x** for CPU inference, wrapp
 
 ```bash
 git clone https://github.com/Nryreddy/CloudPoseAI.git
-cd cloudpose
+cd CloudPoseAI
 docker build -t CloudPoseAI-api .
 docker run -p 60000:60000 CloudPoseAI-api
 # open swagger: http://localhost:60000/docs
