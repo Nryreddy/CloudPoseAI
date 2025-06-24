@@ -3,9 +3,11 @@ CloudPose is a small but production ready web service that turns any JPEG into s
 It is built with **FastAPI** + **Ultralytics YOLOv11x** for CPU inference, wrapped in a small Docker image, and deployed as a horizontally scalable Kubernetes deployment.
 
 ![image](https://github.com/user-attachments/assets/437632c6-5899-409d-b61e-e12ce9c98fea)
-![image](https://github.com/user-attachments/assets/05322223-2587-4ee2-9085-5be313ef77db)
+![image](https://github.com/user-attachments/assets/4ee17a96-5e44-4ee6-abb3-41bb357a0113)
 
-## Why this project?
+
+
+## About
 * **Two clean REST endpoints**  
   * `/json_keypoints` → returns key-points & boxes as JSON  
   * `/annotated_image` → returns the same image with a skeleton overlay
